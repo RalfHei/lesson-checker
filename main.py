@@ -75,6 +75,14 @@ def process_journal(journal_id, cookie):
         total_planned_hours = journal_details.get('totalPlannedHours', 0)
         capacity_hours = journal_details.get('capacityHours', {})
         
+        # Calculate total journal hours
+        total_journal_hours = sum(
+            hours.get('usedHours', 0) for hours in capacity_hours.values()
+        )
+        
+        # Calculate completion percentage
+        completion_percentage = (total_journal_hours / total_planned_hours * 100) if total_planned_hours > 0 else 0
+        
         summary = Text.assemble(
             ("Summary\n", "bold magenta"),
             ("Total Dates: ", "bold cyan"), (f"{total_dates}\n", "yellow"),
@@ -83,7 +91,10 @@ def process_journal(journal_id, cookie):
             ("Completion Rate: ", "bold cyan"), 
             (f"{complete_dates/total_dates*100:.1f}%" if total_dates > 0 else "N/A", "yellow"),
             ("\nJournal Hours\n", "bold magenta"),
-            ("Total Planned Hours: ", "bold cyan"), (f"{total_planned_hours}\n", "yellow")
+            ("Total Planned Hours: ", "bold cyan"), (f"{total_planned_hours}\n", "yellow"),
+            ("Total Journal Hours: ", "bold cyan"), (f"{total_journal_hours}\n", "green"),
+            ("Planned vs Journal Completion: ", "bold cyan"), 
+            (f"{completion_percentage:.1f}%\n", "green" if completion_percentage >= 100 else "yellow" if completion_percentage >= 75 else "red")
         )
         
         # Add capacity-specific hours if available
@@ -118,8 +129,6 @@ def process_journal(journal_id, cookie):
         return False
     except Exception as e:
         console.print(f"[bold red]Error processing journal {journal_id}: {e}[/bold red]")
-        import traceback
-        console.print(f"[dim]{traceback.format_exc()}[/dim]")
         return False
 
 

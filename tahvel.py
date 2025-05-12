@@ -60,10 +60,6 @@ def get_journal_details(journal_id, cookie):
         for capacity in capacity_hours
     }
     
-    console.print(f"[bold cyan]Fetched journal details. Total planned hours: {total_planned_hours}[/bold cyan]")
-    console.print(f"[bold cyan]Hours by capacity: {differentiated_hours}[/bold cyan]")
-    console.print(f"[bold cyan]All possible capacities: {all_capacities}[/bold cyan]")
-    
     return {
         'totalPlannedHours': total_planned_hours,
         'capacityHours': differentiated_hours,
@@ -82,8 +78,6 @@ def get_journal_entries(journal_id, cookie):
         'page': 0,
         'size': 50
     }
-    
-    console.print("[bold blue]Fetching journal entries...[/bold blue]")
     
     all_entries = []
     page_count = 0
@@ -138,6 +132,7 @@ def process_journal_entries(journal_entries):
         # Ensure 'entryDate' exists and is not None
         entry_date = entry.get('entryDate')
         if not entry_date:
+            console.print(f"[dim yellow]Skipping entry without a valid 'entryDate': {entry}[/dim yellow]")
             continue  # Skip entries without a valid date
             
         try:
@@ -145,7 +140,11 @@ def process_journal_entries(journal_entries):
             date_obj = datetime.fromisoformat(entry_date.replace('Z', '+00:00'))
             date_str = date_obj.strftime('%Y-%m-%d')
             
-            lessons_count = entry.get('lessons', 0)
+            # Ensure lessons_count is an integer, defaulting to 0 if None
+            lessons_count = entry.get('lessons') or 0
+            if not isinstance(lessons_count, int):
+                raise TypeError(f"'lessons' field is not an integer: {lessons_count}")
+            
             content = entry.get('content', 'N/A')
             
             # Handle different formats of entryType (string or dictionary)
@@ -167,6 +166,7 @@ def process_journal_entries(journal_entries):
                     'regular_lessons': 0,  # SISSEKANNE_T count
                     'independent_lessons': 0,  # SISSEKANNE_I count
                     'other_lessons': 0,  # Other types count
+                    'grading': 0,  # SISSEKANNE_H count
                     'entry_types': {}  # Count by entry type
                 }
             
@@ -178,6 +178,8 @@ def process_journal_entries(journal_entries):
                 entry_map[date_str]['regular_lessons'] += lessons_count
             elif entry_type == 'SISSEKANNE_I':
                 entry_map[date_str]['independent_lessons'] += lessons_count
+            elif entry_type == 'SISSEKANNE_H':
+                entry_map[date_str]['grading'] += lessons_count
             else:
                 entry_map[date_str]['other_lessons'] += lessons_count
             
@@ -188,6 +190,7 @@ def process_journal_entries(journal_entries):
             
         except (ValueError, TypeError) as e:
             console.print(f"[dim red]Error processing entry: {e}[/dim red]")
+            console.print(f"[dim red]Problematic entry: {entry}[/dim red]")
             continue
     
     return dict(sorted(entry_map.items()))
@@ -263,7 +266,6 @@ def get_journals(study_year_id, cookie):
         'studyYear': study_year_id
     }
 
-    console.print("[bold blue]Fetching journals...[/bold blue]")
     journals = []
 
     with console.status("[bold green]Loading journals...[/bold green]") as status:
