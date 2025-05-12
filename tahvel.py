@@ -135,16 +135,25 @@ def process_journal_entries(journal_entries):
     entry_map = {}
     
     for entry in journal_entries:
-        if 'entryDate' not in entry:
-            continue
+        # Ensure 'entryDate' exists and is not None
+        entry_date = entry.get('entryDate')
+        if not entry_date:
+            continue  # Skip entries without a valid date
             
         try:
-            date_obj = datetime.fromisoformat(entry['entryDate'].replace('Z', '+00:00'))
+            # Convert the date to a datetime object
+            date_obj = datetime.fromisoformat(entry_date.replace('Z', '+00:00'))
             date_str = date_obj.strftime('%Y-%m-%d')
             
             lessons_count = entry.get('lessons', 0)
             content = entry.get('content', 'N/A')
-            entry_type = entry.get('entryType', 'UNKNOWN')
+            
+            # Handle different formats of entryType (string or dictionary)
+            entry_type_data = entry.get('entryType', 'UNKNOWN')
+            if isinstance(entry_type_data, dict):
+                entry_type = entry_type_data.get('code', 'UNKNOWN')
+            else:
+                entry_type = entry_type_data  # Use directly if it's a string
             
             # Truncate content if it's too long
             if content and len(content) > 40:
@@ -177,7 +186,8 @@ def process_journal_entries(journal_entries):
                 entry_map[date_str]['entry_types'][entry_type] = 0
             entry_map[date_str]['entry_types'][entry_type] += lessons_count
             
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            console.print(f"[dim red]Error processing entry: {e}[/dim red]")
             continue
     
     return dict(sorted(entry_map.items()))

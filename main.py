@@ -196,115 +196,106 @@ def create_comparison_table(comparison_results):
     return table, missing_count
 
 def main():
-    """Main function to compare planned lessons with actual journal entries."""
-    # Set up argument parser
-    parser = argparse.ArgumentParser(description='Check Tahvel journal entries against planned lessons')
-    parser.add_argument('--journal-id', '-j', type=str,
-                      help='Journal ID to check (if not provided, will list all available journals)')
-    parser.add_argument('--cookie', '-c', type=str,
-                      help='Authentication cookie for Tahvel (if not provided, will use saved cookie)')
-    parser.add_argument('--save-cookie', '-s', action='store_true',
-                      help='Save the provided cookie for future use')
-    parser.add_argument('--all-journals', '-a', action='store_true',
-                      help='Process all journals for the selected study year')
+    """Main function to run the script."""
+    parser = argparse.ArgumentParser(description="Tahvel Lesson Completion Checker")
+    parser.add_argument("-j", "--journal-id", type=int, help="Journal ID to check (if not provided, will list all available journals)")
+    parser.add_argument("-c", "--cookie", type=str, help="Authentication cookie for Tahvel (if not provided, will use saved cookie)")
+    parser.add_argument("-s", "--save-cookie", action="store_true", help="Save the provided cookie for future use")
+    parser.add_argument("-a", "--all-journals", action="store_true", help="Process all journals for the selected study year")
+    parser.add_argument("-y", "--study-year", type=int, help="Study year ID (if not provided, will prompt for selection)")
+    
     args = parser.parse_args()
     
-    # Handle cookie
-    cookie = args.cookie
+    # Get cookie (either from args, saved file, or prompt)
+    cookie = load_cookie()
     if not cookie:
-        cookie = load_cookie()
-        if not cookie:
-            console.print("[bold red]Error: No cookie provided and no saved cookie found.[/bold red]")
-            console.print("[bold yellow]Please provide a cookie with the --cookie/-c option.[/bold yellow]")
-            console.print("[bold yellow]You can save it for future use with the --save-cookie/-s flag.[/bold yellow]")
-            return
-    elif args.save_cookie:
-        if save_cookie(cookie):
-            console.print("[bold green]Cookie saved successfully for future use.[/bold green]")
+        console.print("[bold red]No valid cookie provided. Exiting.[/bold red]")
+        return
     
-    # If journal ID is provided directly, process that journal only
+    # Save cookie if requested
+    if args.cookie and args.save_cookie:
+        save_cookie(args.cookie)
+        console.print("[bold green]Cookie saved for future use.[/bold green]")
+    
+    # If journal ID is provided, process that specific journal
     if args.journal_id:
         process_journal(args.journal_id, cookie)
         return
-        # Otherwise, list study years and journals
+    
+    # Get study years
     try:
-        # Get study years
-        console.print("[bold blue]Fetching available study years...[/bold blue]")
-        years = get_study_years(cookie)
-        if not years:
-            console.print("[bold red]No study years found.[/bold red]")
-            return
-        
-        # Display study years and prompt for selection
-        year_map = display_study_years(years)
-        study_year_choice = IntPrompt.ask(
-            "Select a study year (enter the option number)", 
-            choices=[str(i) for i in year_map.keys()],
-            show_choices=False
-        )
-        
-        selected_year = year_map[study_year_choice]
-        study_year_id = selected_year.get('id')
-        
-        console.print(f"[bold green]Selected study year: {selected_year.get('nameEt')}[/bold green]")
-        
-        # Get journals for the selected study year
-        console.print("[bold blue]Fetching journals...[/bold blue]")
-        journal_data = get_journals(study_year_id, cookie)
-        if not journal_data:
-            console.print("[bold red]No journals found for the selected study year.[/bold red]")
-            return
-        
-        # If the all-journals flag is set, process all journals
-        if args.all_journals:
-            console.print(f"[bold blue]Processing all {len(journal_data)} journals...[/bold blue]")
-            successful_journals = 0
-            for i, journal_entry in enumerate(journal_data, 1):
-                # Check what we received - if it's just an ID (integer) or a dictionary
-                if isinstance(journal_entry, dict) and 'id' in journal_entry:
-                    journal_id = journal_entry['id']
-                    journal_name = journal_entry.get('nameEt', 'Unknown')
-                elif isinstance(journal_entry, (int, str)):
-                    # If it's just an ID
-                    journal_id = str(journal_entry)
-                    journal_name = f"Journal {journal_id}"
-                else:
-                    console.print(f"[bold yellow]Skipping journal {i} - invalid format: {journal_entry}[/bold yellow]")
-                    continue
-                
-                console.print(f"[bold cyan]Processing journal {i} of {len(journal_data)}: {journal_name} (ID: {journal_id})[/bold cyan]")
-                
-                if process_journal(journal_id, cookie):
-                    successful_journals += 1
-                
-                console.print("\n" + "-" * 80 + "\n")
-            
-            console.print(f"[bold green]Successfully processed {successful_journals} out of {len(journal_data)} journals[/bold green]")
-        else:
-            # Display journals and prompt for selection
-            journal_map = display_journals(journal_data)
-            journal_choice = IntPrompt.ask(
-                "Select a journal (enter the option number)", 
-                choices=[str(i) for i in journal_map.keys()],
-                show_choices=False
-            )
-            
-            selected_journal = journal_map[journal_choice]
-            journal_id = selected_journal.get('id')
-            
-            console.print(f"[bold green]Selected journal: {selected_journal.get('nameEt')}[/bold green]")
-            
-            # Process the selected journal
-            process_journal(journal_id, cookie)
-
+        study_years = get_study_years(cookie)
     except requests.exceptions.HTTPError as e:
         console.print(f"[bold red]HTTP Error: {e}[/bold red]")
         if e.response.status_code == 401 or e.response.status_code == 403:
             console.print("[bold yellow]Authentication failed. Your cookie may be expired or invalid.[/bold yellow]")
+        return
     except Exception as e:
-        console.print(f"[bold red]Error: {e}[/bold red]")
-        import traceback
-        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        console.print(f"[bold red]Error fetching study years: {e}[/bold red]")
+        return
+    
+    # Select study year
+    study_year_id = None
+    
+    # If study year ID was provided in arguments
+    if args.study_year:
+        # Verify the provided study year ID exists
+        study_year = next((year for year in study_years if year.get('id') == args.study_year), None)
+        if study_year:
+            study_year_id = args.study_year
+            console.print(f"[bold green]Using specified study year: {study_year.get('nameEt', 'Unknown')} (ID: {study_year_id})[/bold green]")
+        else:
+            console.print(f"[bold red]The specified study year ID {args.study_year} was not found. Available study years:[/bold red]")
+            study_year_map = display_study_years(study_years)
+            return
+    else:
+        # Interactive selection
+        study_year_map = display_study_years(study_years)
+        if not study_year_map:
+            console.print("[bold red]No study years found.[/bold red]")
+            return
+        
+        choice = IntPrompt.ask("Select a study year", choices=[str(i) for i in study_year_map.keys()])
+        study_year = study_year_map[choice]
+        study_year_id = study_year['id']
+    
+    # Get journals for the selected study year
+    try:
+        journals = get_journals(study_year_id, cookie)
+    except requests.exceptions.HTTPError as e:
+        console.print(f"[bold red]HTTP Error: {e}[/bold red]")
+        return
+    except Exception as e:
+        console.print(f"[bold red]Error fetching journals: {e}[/bold red]")
+        return
+    
+    if not journals:
+        console.print("[bold red]No journals found for the selected study year.[/bold red]")
+        return
+    
+    # Process all journals or select one
+    if args.all_journals:
+        console.print(f"[bold blue]Processing all {len(journals)} journals...[/bold blue]")
+        success_count = 0
+        for journal in journals:
+            journal_id = journal.get('id')
+            journal_name = journal.get('nameEt', 'Unknown')
+            console.print(f"\n[bold cyan]Processing journal: {journal_name} (ID: {journal_id})[/bold cyan]")
+            if process_journal(journal_id, cookie):
+                success_count += 1
+        console.print(f"[bold green]Successfully processed {success_count} out of {len(journals)} journals.[/bold green]")
+    else:
+        # Interactive journal selection
+        journal_map = display_journals(journals)
+        if not journal_map:
+            console.print("[bold red]No journals found.[/bold red]")
+            return
+        
+        choice = IntPrompt.ask("Select a journal to check", choices=[str(i) for i in journal_map.keys()])
+        journal = journal_map[choice]
+        journal_id = journal['id']
+        
+        process_journal(journal_id, cookie)
 
 # Run the application
 if __name__ == "__main__":
