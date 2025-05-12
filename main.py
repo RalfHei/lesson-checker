@@ -8,7 +8,7 @@ import os
 import pickle
 import requests
 
-from tahvel import compare_entries, get_journal_entries, get_planned_dates, process_journal_entries, process_planned_dates, get_journals, get_study_years
+from tahvel import compare_entries, get_journal_entries, get_planned_dates, process_journal_entries, process_planned_dates, get_journals, get_study_years, get_journal_details
 
 # Make sure rich is installed
 # If not installed, run: pip install rich
@@ -54,6 +54,7 @@ def process_journal(journal_id, cookie):
         # Get data
         planned_dates = get_planned_dates(journal_id, cookie)
         journal_entries = get_journal_entries(journal_id, cookie)
+        journal_details = get_journal_details(journal_id, cookie)
         
         # Process data
         planned_dates_map = process_planned_dates(planned_dates)
@@ -70,14 +71,43 @@ def process_journal(journal_id, cookie):
         total_dates = len(comparison_results)
         complete_dates = total_dates - missing_count
         
+        # Get hours information from journal details
+        total_planned_hours = journal_details.get('totalPlannedHours', 0)
+        capacity_hours = journal_details.get('capacityHours', {})
+        
         summary = Text.assemble(
             ("Summary\n", "bold magenta"),
             ("Total Dates: ", "bold cyan"), (f"{total_dates}\n", "yellow"),
             ("Complete Dates: ", "bold cyan"), (f"{complete_dates}\n", "green"),
             ("Incomplete Dates: ", "bold cyan"), (f"{missing_count}\n", "red"),
             ("Completion Rate: ", "bold cyan"), 
-            (f"{complete_dates/total_dates*100:.1f}%" if total_dates > 0 else "N/A", "yellow")
+            (f"{complete_dates/total_dates*100:.1f}%" if total_dates > 0 else "N/A", "yellow"),
+            ("\nJournal Hours\n", "bold magenta"),
+            ("Total Planned Hours: ", "bold cyan"), (f"{total_planned_hours}\n", "yellow")
         )
+        
+        # Add capacity-specific hours if available
+        if capacity_hours:
+            for capacity, hours in capacity_hours.items():
+                if not isinstance(hours, dict):
+                    continue  # Skip if hours is not a dictionary
+                
+                planned = hours.get('plannedHours', 0)
+                used = hours.get('usedHours', 0)
+                remaining = planned - used
+                completion_percent = (used / planned * 100) if planned > 0 else 0
+                
+                capacity_label = capacity.split('_')[-1] if '_' in capacity else capacity
+                
+                summary.append(Text.assemble(
+                    (f"Capacity {capacity_label}: ", "bold cyan"),
+                    (f"Planned: {planned}, ", "yellow"),
+                    (f"Used: {used}, ", "green"),
+                    (f"Remaining: {remaining}, ", "blue"),
+                    (f"Completion: {completion_percent:.1f}%\n", 
+                     "green" if completion_percent >= 100 else "yellow" if completion_percent >= 75 else "red")
+                ))
+        
         console.print(Panel(summary, border_style="green"))
         
         return True
@@ -88,6 +118,8 @@ def process_journal(journal_id, cookie):
         return False
     except Exception as e:
         console.print(f"[bold red]Error processing journal {journal_id}: {e}[/bold red]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
         return False
 
 
@@ -113,7 +145,6 @@ def load_cookie():
         console.print(f"[bold yellow]Warning: Could not load saved cookie: {e}[/bold yellow]")
     return None
 
-
 def create_comparison_table(comparison_results):
     """Create a table showing the comparison results."""
     table = Table(show_header=True, 
@@ -124,16 +155,28 @@ def create_comparison_table(comparison_results):
     table.add_column("Date", style="cyan")
     table.add_column("Content", style="yellow", max_width=40)
     table.add_column("Planned", justify="center", style="magenta")
-    table.add_column("Entered", justify="center", style="blue")
+    table.add_column("Regular (T)", justify="center", style="blue")
+    table.add_column("Independent (I)", justify="center", style="green")
+    table.add_column("Other", justify="center", style="yellow")
     table.add_column("Complete", justify="center")
     
     missing_count = 0
     
     for date, data in comparison_results.items():
         planned = str(data['planned_lessons'])
-        entered = str(data['entered_lessons'])
+        regular = str(data['regular_lessons'])
+        independent = str(data['independent_lessons'])
+        other = str(data['other_lessons'])
         
-        # Determine if all planned lessons are accounted for
+        # Get entry type details if available
+        entry_types = data.get('entry_types', {})
+        entry_type_str = ", ".join([f"{k.split('_')[-1]}:{v}" for k, v in entry_types.items() if k != 'SISSEKANNE_T' and k != 'SISSEKANNE_I'])
+        if entry_type_str:
+            other_with_details = f"{other} ({entry_type_str})"
+        else:
+            other_with_details = other
+        
+        # Determine if all planned lessons are accounted for by regular lessons
         if data['all_inserted']:
             status = "[bold green]✓[/bold green]"
         else:
@@ -144,7 +187,9 @@ def create_comparison_table(comparison_results):
             date,
             data['content'],
             planned,
-            entered,
+            regular,
+            independent,
+            other_with_details,
             status
         )
     

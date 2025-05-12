@@ -4,6 +4,21 @@ from rich.console import Console
 import requests
 
 console = Console()
+
+def get_entry_types(cookie):
+    url = 'https://tahvel.edu.ee/hois_back/autocomplete/classifiers'
+    params = {'mainClassCode': 'SISSEKANNE'}
+    headers = {'Cookie': cookie}
+
+    with console.status("[bold green]Fetching entry types...[/bold green]") as status:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+
+    entry_types = response.json()
+    codes = [entry['code'] for entry in entry_types]
+    console.print(f"[bold cyan]Fetched {len(codes)} entry codes.[/bold cyan]")
+    return codes
+
 def get_planned_dates(journal_id, cookie):
     """Fetch lesson entry data from Tahvel API."""
     headers = {
@@ -19,6 +34,41 @@ def get_planned_dates(journal_id, cookie):
     console.print(f"[bold cyan]Fetched {len(planned_dates)} planned lesson dates.[/bold cyan]")
     
     return planned_dates
+
+def get_journal_details(journal_id, cookie):
+    """Fetch journal details from Tahvel API and retrieve all possible capacities."""
+    headers = {
+        'Cookie': cookie
+    }
+    url = f'https://tahvel.edu.ee/hois_back/journals/{journal_id}'
+    
+    with console.status("[bold green]Fetching journal details...[/bold green]") as status:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+    journal_details = response.json()
+    lesson_hours = journal_details.get('lessonHours', {})
+    total_planned_hours = lesson_hours.get('totalPlannedHours', 0)
+    capacity_hours = lesson_hours.get('capacityHours', [])
+    
+    all_capacities = {capacity['capacity'] for capacity in capacity_hours}
+    differentiated_hours = {
+        capacity['capacity']: {
+            'plannedHours': capacity.get('plannedHours', 0),
+            'usedHours': capacity.get('usedHours', 0)
+        }
+        for capacity in capacity_hours
+    }
+    
+    console.print(f"[bold cyan]Fetched journal details. Total planned hours: {total_planned_hours}[/bold cyan]")
+    console.print(f"[bold cyan]Hours by capacity: {differentiated_hours}[/bold cyan]")
+    console.print(f"[bold cyan]All possible capacities: {all_capacities}[/bold cyan]")
+    
+    return {
+        'totalPlannedHours': total_planned_hours,
+        'capacityHours': differentiated_hours,
+        'allCapacities': all_capacities
+    }
 
 
 def get_journal_entries(journal_id, cookie):
@@ -81,7 +131,7 @@ def process_planned_dates(planned_dates):
     return dict(sorted(date_map.items()))
 
 def process_journal_entries(journal_entries):
-    """Process journal entries into a structured format by date."""
+    """Process journal entries into a structured format by date, categorized by entry type."""
     entry_map = {}
     
     for entry in journal_entries:
@@ -94,6 +144,7 @@ def process_journal_entries(journal_entries):
             
             lessons_count = entry.get('lessons', 0)
             content = entry.get('content', 'N/A')
+            entry_type = entry.get('entryType', 'UNKNOWN')
             
             # Truncate content if it's too long
             if content and len(content) > 40:
@@ -103,11 +154,28 @@ def process_journal_entries(journal_entries):
                 entry_map[date_str] = {
                     'entries': [],
                     'total_lessons': 0,
-                    'content': content
+                    'content': content,
+                    'regular_lessons': 0,  # SISSEKANNE_T count
+                    'independent_lessons': 0,  # SISSEKANNE_I count
+                    'other_lessons': 0,  # Other types count
+                    'entry_types': {}  # Count by entry type
                 }
             
             entry_map[date_str]['entries'].append(entry)
             entry_map[date_str]['total_lessons'] += lessons_count
+            
+            # Update counts by entry type
+            if entry_type == 'SISSEKANNE_T':
+                entry_map[date_str]['regular_lessons'] += lessons_count
+            elif entry_type == 'SISSEKANNE_I':
+                entry_map[date_str]['independent_lessons'] += lessons_count
+            else:
+                entry_map[date_str]['other_lessons'] += lessons_count
+            
+            # Track all entry types used
+            if entry_type not in entry_map[date_str]['entry_types']:
+                entry_map[date_str]['entry_types'][entry_type] = 0
+            entry_map[date_str]['entry_types'][entry_type] += lessons_count
             
         except (ValueError, TypeError):
             continue
@@ -115,19 +183,28 @@ def process_journal_entries(journal_entries):
     return dict(sorted(entry_map.items()))
 
 def compare_entries(planned_dates_map, journal_entries_map):
-    """Compare planned dates with journal entries to find matches and mismatches."""
+    """Compare planned dates with journal entries to find matches and mismatches.
+    Only regular lessons (SISSEKANNE_T) are compared against planned dates."""
     comparison_results = {}
     
     # Process all planned dates
     for date, times in planned_dates_map.items():
         journal_data = journal_entries_map.get(date, {})
         
+        # For comparison, we only consider regular lessons (SISSEKANNE_T)
+        regular_lessons = journal_data.get('regular_lessons', 0)
+        
         comparison_results[date] = {
             'planned_lessons': len(times),
             'entered_lessons': journal_data.get('total_lessons', 0),
+            'regular_lessons': regular_lessons,
+            'independent_lessons': journal_data.get('independent_lessons', 0),
+            'other_lessons': journal_data.get('other_lessons', 0),
             'content': journal_data.get('content', 'N/A'),
             'times': times,
-            'all_inserted': journal_data.get('total_lessons', 0) >= len(times),
+            'entry_types': journal_data.get('entry_types', {}),
+            # Only regular lessons should match with planned dates
+            'all_inserted': regular_lessons >= len(times),
             'has_journal_entry': date in journal_entries_map
         }
     
@@ -138,14 +215,17 @@ def compare_entries(planned_dates_map, journal_entries_map):
             comparison_results[date] = {
                 'planned_lessons': 0,
                 'entered_lessons': journal_data.get('total_lessons', 0),
+                'regular_lessons': journal_data.get('regular_lessons', 0),
+                'independent_lessons': journal_data.get('independent_lessons', 0),
+                'other_lessons': journal_data.get('other_lessons', 0),
                 'content': journal_data.get('content', 'N/A'),
                 'times': [],
-                'all_inserted': False,
+                'entry_types': journal_data.get('entry_types', {}),
+                'all_inserted': True,  # No planned lessons, so it's technically complete
                 'has_journal_entry': True
             }
     
     return dict(sorted(comparison_results.items()))
-
 
 def get_study_years(cookie):
     """Fetch study years from Tahvel API."""
