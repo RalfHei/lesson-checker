@@ -43,7 +43,7 @@ cd tahvel-checker
 ### Basic usage
 
 ```bash
-python tahvel_checker.py
+python main.py
 ```
 
 This will prompt you to select a study year and journal to check. If you have saved a cookie, it will be used automatically.
@@ -51,7 +51,7 @@ This will prompt you to select a study year and journal to check. If you have sa
 ### Command-line arguments
 
 ```
-python tahvel_checker.py [options]
+python main.py [options]
 
 options:
   -h, --help            Show this help message and exit
@@ -67,17 +67,17 @@ options:
 
 Check a specific journal:
 ```bash
-python tahvel_checker.py --journal-id 12345 --cookie "your_cookie_value"
+python main.py --journal-id 12345 --cookie "your_cookie_value"
 ```
 
 Save your cookie for future use:
 ```bash
-python tahvel_checker.py --cookie "your_cookie_value" --save-cookie
+python main.py --cookie "your_cookie_value" --save-cookie
 ```
 
 Process all journals in a selected study year:
 ```bash
-python tahvel_checker.py --all-journals
+python main.py --all-journals
 ```
 
 ## Getting Your Tahvel Cookie
